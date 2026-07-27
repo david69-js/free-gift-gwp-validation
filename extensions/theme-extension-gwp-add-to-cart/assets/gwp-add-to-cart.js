@@ -18,8 +18,15 @@
   var giftVariantId = Number(String(config.gift_variant_id).split('/').pop());
   var minSubtotal = Number(config.min_subtotal);
   var CART_MUTATION_PATH = /\/cart\/(add|change|update|clear)(\.js)?(\?|$)/;
+  var GIFT_MARKER_KEY = '_gwp_gift';
+  var GIFT_MESSAGE_KEY = 'Gift';
+  var GIFT_MESSAGE_VALUE = '🎁 Free gift with your order';
   var syncing = false;
   var syncQueued = false;
+
+  function isGiftLine(item) {
+    return item.variant_id === giftVariantId && item.properties && item.properties[GIFT_MARKER_KEY] === 'true';
+  }
 
   function getCart() {
     return fetch('/cart.js', {headers: {Accept: 'application/json'}}).then(function (res) {
@@ -31,10 +38,14 @@
   }
 
   function addGift() {
+    var properties = {};
+    properties[GIFT_MARKER_KEY] = 'true';
+    properties[GIFT_MESSAGE_KEY] = GIFT_MESSAGE_VALUE;
+
     return fetch('/cart/add.js', {
       method: 'POST',
       headers: {'Content-Type': 'application/json', Accept: 'application/json'},
-      body: JSON.stringify({items: [{id: giftVariantId, quantity: 1}]}),
+      body: JSON.stringify({items: [{id: giftVariantId, quantity: 1, properties: properties}]}),
     });
   }
 
@@ -55,9 +66,7 @@
 
     getCart()
       .then(function (cart) {
-        var giftLine = cart.items.find(function (item) {
-          return item.variant_id === giftVariantId;
-        });
+        var giftLine = cart.items.find(isGiftLine);
         var giftLineTotal = giftLine ? giftLine.line_price : 0;
         var subtotalExcludingGift = (cart.items_subtotal_price != null ? cart.items_subtotal_price : cart.total_price) - giftLineTotal;
         var qualifies = subtotalExcludingGift / 100 >= minSubtotal;
@@ -112,7 +121,27 @@
     };
   }
 
+  // Belt-and-suspenders: some themes cache their own reference to `fetch`
+  // before this script runs (bypassing the patch above), or mutate the cart
+  // through a path we don't recognize. Polling guarantees we notice a change
+  // within a few seconds regardless of how the theme's add-to-cart works.
+  function pollCart() {
+    setInterval(syncGiftLine, 2500);
+  }
+
+  var COMMON_CART_EVENTS = ['cart:updated', 'cart:refresh', 'cart:build', 'cart:change', 'cart:update'];
+
+  function watchCommonCartEvents() {
+    COMMON_CART_EVENTS.forEach(function (eventName) {
+      document.addEventListener(eventName, function () {
+        setTimeout(syncGiftLine, 250);
+      });
+    });
+  }
+
   watchCartMutations();
+  watchCommonCartEvents();
+  pollCart();
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', syncGiftLine);

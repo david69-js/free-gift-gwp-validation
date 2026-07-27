@@ -11,6 +11,9 @@
             "merchandise": {
               "__typename": "ProductVariant",
               "id": "gid://shopify/ProductVariant/999"
+            },
+            "giftMarker": {
+              "value": "true"
             }
           },
           {
@@ -19,6 +22,9 @@
             "merchandise": {
               "__typename": "ProductVariant",
               "id": "gid://shopify/ProductVariant/999"
+            },
+            "giftMarker": {
+              "value": "true"
             }
           }
         ]

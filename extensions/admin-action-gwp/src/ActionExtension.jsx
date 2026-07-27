@@ -20,6 +20,40 @@ const PRODUCT_FIELDS = `
   }
 `;
 
+async function ensureStorefrontMetafieldAccess() {
+  // Idempotent: lets the theme app extension read this config via Liquid
+  // (`shop.metafields['$app:gwp']['config']`). Safe to call on every save -
+  // if the definition already exists, we just ignore the resulting error.
+  try {
+    const result = await adminFetch(
+      `mutation EnsureGwpDefinition($definition: MetafieldDefinitionInput!) {
+        metafieldDefinitionCreate(definition: $definition) {
+          createdDefinition { id }
+          userErrors { field message code }
+        }
+      }`,
+      {
+        definition: {
+          name: "Gift With Purchase configuration",
+          namespace: NAMESPACE,
+          key: KEY,
+          type: "json",
+          ownerType: "SHOP",
+          access: {admin: "MERCHANT_READ", storefront: "PUBLIC_READ"},
+        },
+      },
+    );
+
+    const userErrors = result.metafieldDefinitionCreate.userErrors;
+    const isAlreadyExists = userErrors.some((e) => e.code === "TAKEN");
+    if (userErrors.length > 0 && !isAlreadyExists) {
+      console.error("GWP metafield definition userErrors", userErrors);
+    }
+  } catch (e) {
+    console.error("GWP metafield definition creation failed", e);
+  }
+}
+
 async function adminFetch(query, variables) {
   const res = await fetch("shopify:admin/api/graphql.json", {
     method: "POST",
@@ -192,6 +226,8 @@ function Extension() {
       });
 
       console.log("GWP saving config", {ownerId: shopId, namespace: NAMESPACE, key: KEY, value});
+
+      await ensureStorefrontMetafieldAccess();
 
       const result = await adminFetch(
         `mutation SetGwpConfig($ownerId: ID!, $namespace: String!, $key: String!, $value: String!) {

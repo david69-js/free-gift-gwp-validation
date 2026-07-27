@@ -16,11 +16,16 @@ export function cartValidationsGenerateRun(input: CartValidationsGenerateRunInpu
     return { operations: [] };
   }
 
+  // Match on the "_gwp_gift" line property (set when the storefront script
+  // auto-adds the gift), not just the variant id - otherwise a customer who
+  // separately buys the same product for real would be miscounted as an
+  // extra free gift.
   const giftQuantity = input.cart.lines
     .filter(
       (line) =>
         line.merchandise.__typename === "ProductVariant" &&
-        line.merchandise.id === configuration.gift_variant_id,
+        line.merchandise.id === configuration.gift_variant_id &&
+        line.giftMarker?.value === "true",
     )
     .reduce((total, line) => total + line.quantity, 0);
 

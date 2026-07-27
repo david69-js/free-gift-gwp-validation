@@ -1,16 +1,20 @@
 {
   "payload": {
-    "export": "cart-transform-run",
-    "target": "cart.transform.run",
+    "export": "cart-validations-generate-run",
+    "target": "cart.validations.generate.run",
     "input": {
       "cart": {
+        "cost": {
+          "subtotalAmount": {
+            "amount": "40.00"
+          }
+        },
         "lines": [
           {
-            "id": "gid://shopify/CartLine/1",
-            "quantity": 1,
+            "quantity": 2,
             "merchandise": {
               "__typename": "ProductVariant",
-              "id": "gid://shopify/ProductVariant/111"
+              "id": "gid://shopify/ProductVariant/999"
             },
             "giftMarker": null
           }
@@ -26,7 +30,13 @@
       }
     },
     "output": {
-      "operations": []
+      "operations": [
+        {
+          "validationAdd": {
+            "errors": []
+          }
+        }
+      ]
     }
   }
 }
