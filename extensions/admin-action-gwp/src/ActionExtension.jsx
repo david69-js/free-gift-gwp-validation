@@ -1,0 +1,274 @@
+import "@shopify/ui-extensions/preact";
+import {render} from 'preact';
+import {useEffect, useState} from 'preact/hooks';
+
+export default async () => {
+  render(<Extension />, document.body);
+}
+
+const NAMESPACE = "$app:gwp";
+const KEY = "config";
+
+const PRODUCT_FIELDS = `
+  id
+  title
+  variants(first: 100) {
+    nodes {
+      id
+      title
+    }
+  }
+`;
+
+async function adminFetch(query, variables) {
+  const res = await fetch("shopify:admin/api/graphql.json", {
+    method: "POST",
+    body: JSON.stringify({query, variables}),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    console.error("GWP admin fetch failed", res.status, text);
+    throw new Error(`Network error (${res.status})`);
+  }
+
+  const json = await res.json();
+  if (json.errors) {
+    console.error("GWP admin fetch GraphQL errors", json.errors);
+    throw new Error(json.errors.map((error) => error.message).join(", "));
+  }
+
+  return json.data;
+}
+
+function Extension() {
+  const {close, data, resourcePicker} = shopify;
+
+  const [productTitle, setProductTitle] = useState('');
+  const [variants, setVariants] = useState([]);
+  const [shopId, setShopId] = useState(null);
+  const [giftVariantId, setGiftVariantId] = useState('');
+  const [minSubtotal, setMinSubtotal] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  function applyProduct(product, presetVariantId) {
+    const productVariants = product.variants.nodes;
+    setProductTitle(product.title);
+    setVariants(productVariants);
+
+    const presetIsOnThisProduct = productVariants.some(
+      (variant) => variant.id === presetVariantId,
+    );
+
+    if (presetIsOnThisProduct) {
+      setGiftVariantId(presetVariantId);
+    } else if (productVariants.length > 0) {
+      setGiftVariantId(productVariants[0].id);
+    } else {
+      setGiftVariantId('');
+    }
+  }
+
+  // Runs once on mount. Shows whichever product is already configured as the
+  // gift (looked up by the saved variant, regardless of which product page
+  // the action was launched from) so the settings always reflect the real
+  // saved state rather than resetting to "the product you happen to be on".
+  useEffect(() => {
+    (async function load() {
+      try {
+        const configResult = await adminFetch(
+          `query GwpShopConfig($namespace: String!, $key: String!) {
+            shop {
+              id
+              metafield(namespace: $namespace, key: $key) {
+                value
+              }
+            }
+          }`,
+          {namespace: NAMESPACE, key: KEY},
+        );
+
+        setShopId(configResult.shop.id);
+
+        console.log("GWP loaded shop metafield", configResult.shop.metafield);
+
+        const existing = configResult.shop.metafield?.value
+          ? JSON.parse(configResult.shop.metafield.value)
+          : null;
+
+        if (existing?.min_subtotal != null) {
+          setMinSubtotal(String(existing.min_subtotal));
+        }
+
+        let product = null;
+
+        if (existing?.gift_variant_id) {
+          const variantResult = await adminFetch(
+            `query GwpVariantProduct($id: ID!) {
+              node(id: $id) {
+                ... on ProductVariant {
+                  product {
+                    ${PRODUCT_FIELDS}
+                  }
+                }
+              }
+            }`,
+            {id: existing.gift_variant_id},
+          );
+          product = variantResult.node?.product ?? null;
+        }
+
+        if (!product) {
+          const productResult = await adminFetch(
+            `query GwpCurrentProduct($id: ID!) {
+              product(id: $id) {
+                ${PRODUCT_FIELDS}
+              }
+            }`,
+            {id: data.selected[0].id},
+          );
+          product = productResult.product;
+        }
+
+        applyProduct(product, existing?.gift_variant_id ?? null);
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  async function handleChooseProduct() {
+    const selection = await resourcePicker({
+      type: "product",
+      action: "select",
+      multiple: false,
+    });
+
+    if (!selection || selection.length === 0) {
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const productResult = await adminFetch(
+        `query GwpPickedProduct($id: ID!) {
+          product(id: $id) {
+            ${PRODUCT_FIELDS}
+          }
+        }`,
+        {id: selection[0].id},
+      );
+
+      applyProduct(productResult.product, null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+
+    try {
+      const parsedMinSubtotal = parseFloat(minSubtotal);
+      if (Number.isNaN(parsedMinSubtotal) || parsedMinSubtotal < 0) {
+        throw new Error("Enter a valid minimum subtotal.");
+      }
+      if (!giftVariantId) {
+        throw new Error("Select which variant is the free gift.");
+      }
+
+      const value = JSON.stringify({
+        min_subtotal: parsedMinSubtotal,
+        gift_variant_id: giftVariantId,
+      });
+
+      console.log("GWP saving config", {ownerId: shopId, namespace: NAMESPACE, key: KEY, value});
+
+      const result = await adminFetch(
+        `mutation SetGwpConfig($ownerId: ID!, $namespace: String!, $key: String!, $value: String!) {
+          metafieldsSet(metafields: [{
+            ownerId: $ownerId,
+            namespace: $namespace,
+            key: $key,
+            type: "json",
+            value: $value
+          }]) {
+            metafields { id namespace key value }
+            userErrors { field message code }
+          }
+        }`,
+        {ownerId: shopId, namespace: NAMESPACE, key: KEY, value},
+      );
+
+      console.log("GWP save result", result.metafieldsSet);
+
+      const userErrors = result.metafieldsSet.userErrors;
+      if (userErrors.length > 0) {
+        console.error("GWP save userErrors", userErrors);
+        throw new Error(userErrors.map((e) => `${e.field ?? ''} ${e.message}`.trim()).join(", "));
+      }
+
+      close();
+    } catch (e) {
+      console.error("GWP save failed", e);
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <s-admin-action>
+      <s-stack direction="block" gap="base">
+        <s-heading>Gift With Purchase settings</s-heading>
+        {loading && <s-spinner accessibilityLabel="Loading" />}
+        {error && <s-banner tone="critical">{error}</s-banner>}
+        {!loading && (
+          <>
+            <s-stack direction="inline" gap="base" alignItems="center">
+              <s-text>Gift product: {productTitle}</s-text>
+              <s-button onClick={handleChooseProduct}>Choose a different product</s-button>
+            </s-stack>
+            {variants.length > 1 ? (
+              <s-select
+                label="Gift variant"
+                value={giftVariantId}
+                onChange={(e) => setGiftVariantId(e.currentTarget.value)}
+              >
+                {variants.map((variant) => (
+                  <s-option key={variant.id} value={variant.id}>
+                    {variant.title}
+                  </s-option>
+                ))}
+              </s-select>
+            ) : (
+              <s-text>This product's variant will be used as the gift.</s-text>
+            )}
+            <s-number-field
+              label="Minimum order subtotal to qualify ($)"
+              value={minSubtotal}
+              min={0}
+              step={0.01}
+              onChange={(e) => setMinSubtotal(e.currentTarget.value)}
+            />
+          </>
+        )}
+      </s-stack>
+      <s-button slot="primary-action" disabled={loading || saving} onClick={handleSave}>
+        {saving ? "Saving..." : "Save"}
+      </s-button>
+      <s-button slot="secondary-actions" onClick={close}>
+        Close
+      </s-button>
+    </s-admin-action>
+  );
+}

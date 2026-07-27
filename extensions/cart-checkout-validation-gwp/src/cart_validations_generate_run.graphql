@@ -1,0 +1,23 @@
+query CartValidationsGenerateRunInput {
+  cart {
+    cost {
+      subtotalAmount {
+        amount
+      }
+    }
+    lines {
+      quantity
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+        }
+      }
+    }
+  }
+  shop {
+    metafield(namespace: "$app:gwp", key: "config") {
+      jsonValue
+    }
+  }
+}
