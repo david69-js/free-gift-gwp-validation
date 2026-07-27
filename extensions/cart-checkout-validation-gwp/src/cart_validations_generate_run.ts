@@ -12,7 +12,21 @@ type Configuration = {
 export function cartValidationsGenerateRun(input: CartValidationsGenerateRunInput): CartValidationsGenerateRunResult {
   const configuration = input.shop.metafield?.jsonValue as Configuration | undefined;
 
+  console.log("[GWP validation] config", JSON.stringify(configuration));
+  console.log(
+    "[GWP validation] lines",
+    JSON.stringify(
+      input.cart.lines.map((line) => ({
+        quantity: line.quantity,
+        variantId: line.merchandise.__typename === "ProductVariant" ? line.merchandise.id : null,
+        giftMarker: line.giftMarker?.value ?? null,
+      })),
+    ),
+  );
+  console.log("[GWP validation] subtotal", input.cart.cost.subtotalAmount.amount);
+
   if (!configuration?.gift_variant_id) {
+    console.log("[GWP validation] no config set, allowing checkout");
     return { operations: [] };
   }
 
@@ -28,6 +42,8 @@ export function cartValidationsGenerateRun(input: CartValidationsGenerateRunInpu
         line.giftMarker?.value === "true",
     )
     .reduce((total, line) => total + line.quantity, 0);
+
+  console.log("[GWP validation] giftQuantity", giftQuantity);
 
   const errors: ValidationError[] = [];
 
@@ -48,6 +64,8 @@ export function cartValidationsGenerateRun(input: CartValidationsGenerateRunInpu
       target: "$.cart",
     });
   }
+
+  console.log("[GWP validation] errors", JSON.stringify(errors));
 
   return {
     operations: [
