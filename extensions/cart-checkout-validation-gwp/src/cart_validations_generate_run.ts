@@ -43,6 +43,11 @@ export function cartValidationsGenerateRun(input: CartValidationsGenerateRunInpu
     return { operations: [] };
   }
 
+  // No test-mode check needed here: the storefront script already gates
+  // adding the "_gwp_gift"-marked line to logged-in customers with the
+  // configured tag, so a non-qualifying customer's cart never has a
+  // gift-marked line for this to act on in the first place.
+
   // Match on the "_gwp_gift" line property (set when the storefront script
   // auto-adds the gift), not just the variant id - otherwise a customer who
   // separately buys the same product for real would be miscounted as an

@@ -1,7 +1,6 @@
 import type {
   CartTransformRunInput,
   CartTransformRunResult,
-  Operation,
 } from "../generated/api";
 
 const NO_CHANGES: CartTransformRunResult = {
@@ -48,25 +47,11 @@ export function cartTransformRun(input: CartTransformRunInput): CartTransformRun
     return NO_CHANGES;
   }
 
-  console.log("[GWP cart-transform] clamping price to 0.00 for line", giftLine.id);
-
-  // Defensive clamp: the gift is expected to already be $0 in the catalog,
-  // but this guarantees it regardless of manual pricing changes or bugs.
-  // Requires a Shopify Plus plan (`lineUpdate` price overrides are Plus-only).
-  const operations: Operation[] = [
-    {
-      lineUpdate: {
-        cartLineId: giftLine.id,
-        price: {
-          adjustment: {
-            fixedPricePerUnit: {
-              amount: "0.00",
-            },
-          },
-        },
-      },
-    },
-  ];
-
-  return { operations };
+  // Disabled: `lineUpdate` price overrides require a Shopify Plus plan.
+  // Attempting one on a non-Plus store can cause a hard cart calculation
+  // error (blocking add/remove for the whole cart), not a silent no-op.
+  // The gift is expected to already be $0 in the catalog, so this isn't
+  // needed for non-Plus stores anyway.
+  console.log("[GWP cart-transform] gift line found but price clamp is disabled (non-Plus store)", giftLine.id);
+  return NO_CHANGES;
 }

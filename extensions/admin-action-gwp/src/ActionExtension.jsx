@@ -83,6 +83,8 @@ function Extension() {
   const [shopId, setShopId] = useState(null);
   const [giftVariantId, setGiftVariantId] = useState('');
   const [minSubtotal, setMinSubtotal] = useState('');
+  const [testMode, setTestMode] = useState(false);
+  const [testTag, setTestTag] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -135,6 +137,9 @@ function Extension() {
         if (existing?.min_subtotal != null) {
           setMinSubtotal(String(existing.min_subtotal));
         }
+
+        setTestMode(Boolean(existing?.test_mode));
+        setTestTag(Array.isArray(existing?.test_tag) ? (existing.test_tag[0] ?? '') : '');
 
         let product = null;
 
@@ -219,10 +224,17 @@ function Extension() {
       if (!giftVariantId) {
         throw new Error("Select which variant is the free gift.");
       }
+      if (testMode && !testTag.trim()) {
+        throw new Error("Enter a customer tag while test mode is on.");
+      }
 
       const value = JSON.stringify({
         min_subtotal: parsedMinSubtotal,
         gift_variant_id: giftVariantId,
+        test_mode: testMode,
+        // Always an array (even empty) so the validation function's input
+        // query can bind it directly to a non-null `[String!]!` argument.
+        test_tag: testMode && testTag.trim() ? [testTag.trim()] : [],
       });
 
       console.log("GWP saving config", {ownerId: shopId, namespace: NAMESPACE, key: KEY, value});
@@ -296,6 +308,19 @@ function Extension() {
               step={0.01}
               onChange={(e) => setMinSubtotal(e.currentTarget.value)}
             />
+            <s-switch
+              label="Test mode"
+              details="While on, only logged-in customers with the tag below get the gift. Everyone else sees no change."
+              checked={testMode}
+              onChange={(e) => setTestMode(e.currentTarget.checked)}
+            />
+            {testMode && (
+              <s-text-field
+                label="Test customer tag"
+                value={testTag}
+                onChange={(e) => setTestTag(e.currentTarget.value)}
+              />
+            )}
           </>
         )}
       </s-stack>

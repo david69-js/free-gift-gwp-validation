@@ -12,7 +12,10 @@
       "min_subtotal": {{ gwp_config.value.min_subtotal | json }},
       "gift_variant_id": {{ gwp_config.value.gift_variant_id | json }},
       "country": {{ localization.country.iso_code | json }},
-      "currency": {{ cart.currency.iso_code | json }}
+      "currency": {{ cart.currency.iso_code | json }},
+      "test_mode": {{ gwp_config.value.test_mode | json }},
+      "test_tag": {{ gwp_config.value.test_tag | json }},
+      "customer_tags": {% if customer %}{{ customer.tags | json }}{% else %}[]{% endif %}
     }
   </script>
   <script src="{{ 'gwp-add-to-cart.js' | asset_url }}" defer="defer"></script>
