@@ -39,8 +39,19 @@
     return typeof window.liquidAjaxCart !== 'undefined' && window.liquidAjaxCart !== null;
   }
 
-  function isGiftLine(item) {
+  // "Our" gift line: the one we auto-added and are responsible for
+  // managing (removing/clamping). We never touch a line without this
+  // marker - it might be something the customer added on purpose.
+  function isManagedGiftLine(item) {
     return item.variant_id === giftVariantId && item.properties && item.properties[GIFT_MARKER_KEY] === 'true';
+  }
+
+  // Any line for the gift variant, marked or not. The gift is a real,
+  // $0-priced product - a customer can always reach its product page and
+  // add it with the normal "Add to cart" button. We must count that too,
+  // otherwise we'd add a second (marked) unit on top of it.
+  function isAnyGiftVariantLine(item) {
+    return item.variant_id === giftVariantId;
   }
 
   // Re-checked on every sync (not just once at page load) so a customer
@@ -120,42 +131,51 @@
 
     Promise.resolve(cartOverride || getCart())
       .then(function (cart) {
-        var giftLine = cart.items.find(isGiftLine);
+        var managedGiftLine = cart.items.find(isManagedGiftLine);
+        var anyGiftLines = cart.items.filter(isAnyGiftVariantLine);
+        var anyGiftQuantity = anyGiftLines.reduce(function (total, item) { return total + item.quantity; }, 0);
         var applies = offerApplies();
 
         if (!applies) {
           console.log('[GWP] offer does not apply right now (status/country/currency/test mode), cleaning up', {
-            status: config.status, country: config.country, currency: config.currency, giftLineFound: Boolean(giftLine),
+            status: config.status, country: config.country, currency: config.currency, managedGiftLineFound: Boolean(managedGiftLine),
           });
-          if (giftLine) {
+          if (managedGiftLine) {
             console.log('[GWP] removing gift, offer no longer applies');
-            return setLineQuantity(giftLine.key, 0);
+            return setLineQuantity(managedGiftLine.key, 0);
           }
           return;
         }
 
-        var giftLineTotal = giftLine ? giftLine.line_price : 0;
-        var subtotalExcludingGift = (cart.items_subtotal_price != null ? cart.items_subtotal_price : cart.total_price) - giftLineTotal;
+        // The gift itself is $0, so it never affects the subtotal - but
+        // exclude it explicitly anyway in case a manual price override or
+        // discount ever changes that assumption.
+        var giftLinesTotal = anyGiftLines.reduce(function (total, item) { return total + item.line_price; }, 0);
+        var subtotalExcludingGift = (cart.items_subtotal_price != null ? cart.items_subtotal_price : cart.total_price) - giftLinesTotal;
         var qualifies = subtotalExcludingGift / 100 >= minSubtotal;
 
         console.log('[GWP] sync', {
           subtotalExcludingGift: subtotalExcludingGift / 100,
           minSubtotal: minSubtotal,
           qualifies: qualifies,
-          giftLineFound: Boolean(giftLine),
+          managedGiftLineFound: Boolean(managedGiftLine),
+          anyGiftQuantity: anyGiftQuantity,
           cartItems: cart.items.map(function (i) { return {variant_id: i.variant_id, properties: i.properties}; }),
         });
 
-        if (qualifies && !giftLine) {
+        // Someone already has the gift variant in their cart in some form
+        // (manually from its product page, or our own managed line) -
+        // never add a second one on top of it.
+        if (qualifies && anyGiftQuantity === 0) {
           console.log('[GWP] adding gift');
           return addGift();
         }
-        if (qualifies && giftLine && giftLine.quantity > 1) {
-          return setLineQuantity(giftLine.key, 1);
+        if (qualifies && managedGiftLine && managedGiftLine.quantity > 1) {
+          return setLineQuantity(managedGiftLine.key, 1);
         }
-        if (!qualifies && giftLine) {
+        if (!qualifies && managedGiftLine) {
           console.log('[GWP] removing gift, no longer qualifies');
-          return setLineQuantity(giftLine.key, 0);
+          return setLineQuantity(managedGiftLine.key, 0);
         }
       })
       .catch(function (e) {

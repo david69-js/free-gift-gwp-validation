@@ -51,21 +51,16 @@ export function cartValidationsGenerateRun(input: CartValidationsGenerateRunInpu
     return { operations: [] };
   }
 
-  // No test-mode check needed here: the storefront script already gates
-  // adding the "_gwp_gift"-marked line to logged-in customers with the
-  // configured tag, so a non-qualifying customer's cart never has a
-  // gift-marked line for this to act on in the first place.
-
-  // Match on the "_gwp_gift" line property (set when the storefront script
-  // auto-adds the gift), not just the variant id - otherwise a customer who
-  // separately buys the same product for real would be miscounted as an
-  // extra free gift.
+  // Count EVERY line matching the gift variant, marked or not. The gift
+  // variant is a real $0-priced product, so a customer can always reach
+  // its product page directly and add it with the normal "Add to cart"
+  // button (no "_gwp_gift" property in that case). The storefront script
+  // uses the marker to manage only the line it auto-added, but enforcement
+  // here must close that loophole regardless of how the line got there -
+  // this is the layer that can't be bypassed by skipping the storefront.
   const giftQuantity = input.cart.lines
     .filter(
-      (line) =>
-        line.merchandise.__typename === "ProductVariant" &&
-        line.merchandise.id === configuration.gift_variant_id &&
-        line.giftMarker?.value === "true",
+      (line) => line.merchandise.__typename === "ProductVariant" && line.merchandise.id === configuration.gift_variant_id,
     )
     .reduce((total, line) => total + line.quantity, 0);
 
