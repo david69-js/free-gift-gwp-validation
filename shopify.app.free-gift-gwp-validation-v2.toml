@@ -1,0 +1,16 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "8d31cf58c211d2567564b1f42688243b"
+name = "Free-Gift-GWP-Validation-v2"
+application_url = "https://shopify.dev/apps/default-app-home"
+embedded = true
+
+[webhooks]
+api_version = "2026-10"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers,read_products,write_products"
+
+[auth]
+redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
