@@ -15,33 +15,17 @@
 
   console.log('[GWP] loaded config', config);
 
+  // Only truly bail (never track the cart at all) if we can't even identify
+  // which variant is "the gift" - without that we have nothing to clean up
+  // either. Every other condition below (status, country/currency, test
+  // mode) must NOT just stop and do nothing: if the customer already has
+  // the gift line and a condition stops applying (e.g. they switch their
+  // market from US to another country mid-session), we still need to
+  // actively remove it - not just leave it sitting in the cart forever.
   if (!config.gift_variant_id) {
     console.log('[GWP] no gift_variant_id in config, stopping');
     return;
   }
-
-  // Only run this offer for US customers checking out in USD - everywhere
-  // else, do nothing and leave the cart untouched.
-  if (config.country !== 'US' || config.currency !== 'USD') {
-    console.log('[GWP] country/currency check failed, stopping', {country: config.country, currency: config.currency});
-    return;
-  }
-
-  // Test mode: restrict the whole offer to logged-in customers with the
-  // configured tag. Everyone else sees no change, same as if unconfigured.
-  if (config.test_mode) {
-    var testTags = Array.isArray(config.test_tag) ? config.test_tag : [];
-    var customerTags = Array.isArray(config.customer_tags) ? config.customer_tags : [];
-    var hasTestTag = testTags.some(function (tag) {
-      return customerTags.indexOf(tag) !== -1;
-    });
-    if (!hasTestTag) {
-      console.log('[GWP] test mode on, customer missing tag, stopping', {testTags: testTags, customerTags: customerTags});
-      return;
-    }
-  }
-
-  console.log('[GWP] all checks passed, watching cart for threshold');
 
   var giftVariantId = Number(String(config.gift_variant_id).split('/').pop());
   var minSubtotal = Number(config.min_subtotal);
@@ -57,6 +41,29 @@
 
   function isGiftLine(item) {
     return item.variant_id === giftVariantId && item.properties && item.properties[GIFT_MARKER_KEY] === 'true';
+  }
+
+  // Re-checked on every sync (not just once at page load) so a customer
+  // switching country/market, or a merchant flipping status/test mode,
+  // takes effect on the very next sync - not just on their next page load.
+  function offerApplies() {
+    if (config.status !== 'active') {
+      return false;
+    }
+    if (config.country !== 'US' || config.currency !== 'USD') {
+      return false;
+    }
+    if (config.test_mode) {
+      var testTags = Array.isArray(config.test_tag) ? config.test_tag : [];
+      var customerTags = Array.isArray(config.customer_tags) ? config.customer_tags : [];
+      var hasTestTag = testTags.some(function (tag) {
+        return customerTags.indexOf(tag) !== -1;
+      });
+      if (!hasTestTag) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function getCart() {
@@ -114,6 +121,19 @@
     Promise.resolve(cartOverride || getCart())
       .then(function (cart) {
         var giftLine = cart.items.find(isGiftLine);
+        var applies = offerApplies();
+
+        if (!applies) {
+          console.log('[GWP] offer does not apply right now (status/country/currency/test mode), cleaning up', {
+            status: config.status, country: config.country, currency: config.currency, giftLineFound: Boolean(giftLine),
+          });
+          if (giftLine) {
+            console.log('[GWP] removing gift, offer no longer applies');
+            return setLineQuantity(giftLine.key, 0);
+          }
+          return;
+        }
+
         var giftLineTotal = giftLine ? giftLine.line_price : 0;
         var subtotalExcludingGift = (cart.items_subtotal_price != null ? cart.items_subtotal_price : cart.total_price) - giftLineTotal;
         var qualifies = subtotalExcludingGift / 100 >= minSubtotal;

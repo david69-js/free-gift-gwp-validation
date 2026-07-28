@@ -5,6 +5,7 @@ import type {
 } from "../generated/api";
 
 type Configuration = {
+  status?: string;
   min_subtotal: number;
   gift_variant_id: string;
 };
@@ -27,6 +28,13 @@ export function cartValidationsGenerateRun(input: CartValidationsGenerateRunInpu
 
   if (!configuration?.gift_variant_id) {
     console.log("[GWP validation] no config set, allowing checkout");
+    return { operations: [] };
+  }
+
+  // Master switch: missing/older configs default to "active" so existing
+  // setups keep working exactly as before this setting existed.
+  if (configuration.status === "draft") {
+    console.log("[GWP validation] status is draft, allowing checkout");
     return { operations: [] };
   }
 

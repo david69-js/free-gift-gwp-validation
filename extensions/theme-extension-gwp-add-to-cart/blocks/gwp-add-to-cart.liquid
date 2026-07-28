@@ -9,6 +9,7 @@
 {% if gwp_config.value.gift_variant_id %}
   <script type="application/json" id="gwp-config">
     {
+      "status": {{ gwp_config.value.status | default: 'active' | json }},
       "min_subtotal": {{ gwp_config.value.min_subtotal | json }},
       "gift_variant_id": {{ gwp_config.value.gift_variant_id | json }},
       "country": {{ localization.country.iso_code | json }},

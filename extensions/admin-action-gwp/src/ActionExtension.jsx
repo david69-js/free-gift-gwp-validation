@@ -83,6 +83,7 @@ function Extension() {
   const [shopId, setShopId] = useState(null);
   const [giftVariantId, setGiftVariantId] = useState('');
   const [minSubtotal, setMinSubtotal] = useState('');
+  const [status, setStatus] = useState('active');
   const [testMode, setTestMode] = useState(false);
   const [testTag, setTestTag] = useState('');
   const [loading, setLoading] = useState(true);
@@ -138,6 +139,9 @@ function Extension() {
           setMinSubtotal(String(existing.min_subtotal));
         }
 
+        // Missing/older configs default to "active" so existing setups keep
+        // working exactly as before this setting existed.
+        setStatus(existing?.status === 'draft' ? 'draft' : 'active');
         setTestMode(Boolean(existing?.test_mode));
         setTestTag(Array.isArray(existing?.test_tag) ? (existing.test_tag[0] ?? '') : '');
 
@@ -229,6 +233,7 @@ function Extension() {
       }
 
       const value = JSON.stringify({
+        status: status,
         min_subtotal: parsedMinSubtotal,
         gift_variant_id: giftVariantId,
         test_mode: testMode,
@@ -282,6 +287,15 @@ function Extension() {
         {error && <s-banner tone="critical">{error}</s-banner>}
         {!loading && (
           <>
+            <s-select
+              label="Status"
+              details="Draft: the gift never appears anywhere, for anyone, regardless of other settings. Active: the gift works normally (subject to test mode below, if on)."
+              value={status}
+              onChange={(e) => setStatus(e.currentTarget.value)}
+            >
+              <s-option value="active">Active</s-option>
+              <s-option value="draft">Draft</s-option>
+            </s-select>
             <s-stack direction="inline" gap="base" alignItems="center">
               <s-text>Gift product: {productTitle}</s-text>
               <s-button onClick={handleChooseProduct}>Choose a different product</s-button>
