@@ -54,6 +54,33 @@ async function ensureStorefrontMetafieldAccess() {
   }
 }
 
+async function ensureCartTransformActive() {
+  // Idempotent: registers the cart-transformer-gwp function as an active
+  // CartTransform for this shop/app. Needed once per app installation -
+  // if the app gets deleted and recreated (new client_id), this needs to
+  // run again, since the old activation doesn't carry over.
+  try {
+    const result = await adminFetch(
+      `mutation EnsureCartTransform($functionHandle: String!) {
+        cartTransformCreate(functionHandle: $functionHandle) {
+          cartTransform { id }
+          userErrors { field message code }
+        }
+      }`,
+      {functionHandle: "cart-transformer-gwp"},
+    );
+
+    const userErrors = result.cartTransformCreate.userErrors;
+    if (userErrors.length > 0) {
+      console.error("GWP cartTransformCreate userErrors (ignored if already active)", userErrors);
+    } else {
+      console.log("GWP cartTransformCreate result", result.cartTransformCreate.cartTransform);
+    }
+  } catch (e) {
+    console.error("GWP cartTransformCreate failed", e);
+  }
+}
+
 async function adminFetch(query, variables) {
   const res = await fetch("shopify:admin/api/graphql.json", {
     method: "POST",
@@ -245,6 +272,7 @@ function Extension() {
       console.log("GWP saving config", {ownerId: shopId, namespace: NAMESPACE, key: KEY, value});
 
       await ensureStorefrontMetafieldAccess();
+      await ensureCartTransformActive();
 
       const result = await adminFetch(
         `mutation SetGwpConfig($ownerId: ID!, $namespace: String!, $key: String!, $value: String!) {
