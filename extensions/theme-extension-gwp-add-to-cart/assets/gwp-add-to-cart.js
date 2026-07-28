@@ -15,6 +15,12 @@
     return;
   }
 
+  // Only run this offer for US customers checking out in USD - everywhere
+  // else, do nothing and leave the cart untouched.
+  if (config.country !== 'US' || config.currency !== 'USD') {
+    return;
+  }
+
   var giftVariantId = Number(String(config.gift_variant_id).split('/').pop());
   var minSubtotal = Number(config.min_subtotal);
   var CART_MUTATION_PATH = /\/cart\/(add|change|update|clear)(\.js)?(\?|$)/;

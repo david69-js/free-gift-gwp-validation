@@ -6,7 +6,8 @@
       "cart": {
         "cost": {
           "subtotalAmount": {
-            "amount": "150.00"
+            "amount": "150.00",
+            "currencyCode": "USD"
           }
         },
         "lines": [
@@ -28,6 +29,11 @@
             "min_subtotal": 100.0,
             "gift_variant_id": "gid://shopify/ProductVariant/999"
           }
+        }
+      },
+      "localization": {
+        "country": {
+          "isoCode": "US"
         }
       }
     },

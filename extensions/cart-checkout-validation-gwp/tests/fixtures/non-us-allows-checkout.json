@@ -7,7 +7,7 @@
         "cost": {
           "subtotalAmount": {
             "amount": "40.00",
-            "currencyCode": "USD"
+            "currencyCode": "CAD"
           }
         },
         "lines": [
@@ -17,7 +17,9 @@
               "__typename": "ProductVariant",
               "id": "gid://shopify/ProductVariant/999"
             },
-            "giftMarker": null
+            "giftMarker": {
+              "value": "true"
+            }
           }
         ]
       },
@@ -31,18 +33,12 @@
       },
       "localization": {
         "country": {
-          "isoCode": "US"
+          "isoCode": "CA"
         }
       }
     },
     "output": {
-      "operations": [
-        {
-          "validationAdd": {
-            "errors": []
-          }
-        }
-      ]
+      "operations": []
     }
   }
 }

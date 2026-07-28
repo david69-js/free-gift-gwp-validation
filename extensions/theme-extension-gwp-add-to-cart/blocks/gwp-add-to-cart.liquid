@@ -8,7 +8,12 @@
 {% assign gwp_config = shop.metafields['$app:gwp']['config'] %}
 {% if gwp_config.value.gift_variant_id %}
   <script type="application/json" id="gwp-config">
-    {{ gwp_config.value | json }}
+    {
+      "min_subtotal": {{ gwp_config.value.min_subtotal | json }},
+      "gift_variant_id": {{ gwp_config.value.gift_variant_id | json }},
+      "country": {{ localization.country.iso_code | json }},
+      "currency": {{ cart.currency.iso_code | json }}
+    }
   </script>
   <script src="{{ 'gwp-add-to-cart.js' | asset_url }}" defer="defer"></script>
 {% endif %}

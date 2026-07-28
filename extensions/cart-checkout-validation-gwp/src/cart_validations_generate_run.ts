@@ -30,6 +30,19 @@ export function cartValidationsGenerateRun(input: CartValidationsGenerateRunInpu
     return { operations: [] };
   }
 
+  // This offer only applies to US orders in USD - everywhere else, don't
+  // enforce anything.
+  const isUsInUsd =
+    input.localization.country.isoCode === "US" && input.cart.cost.subtotalAmount.currencyCode === "USD";
+
+  if (!isUsInUsd) {
+    console.log("[GWP validation] not US/USD, allowing checkout", {
+      country: input.localization.country.isoCode,
+      currency: input.cart.cost.subtotalAmount.currencyCode,
+    });
+    return { operations: [] };
+  }
+
   // Match on the "_gwp_gift" line property (set when the storefront script
   // auto-adds the gift), not just the variant id - otherwise a customer who
   // separately buys the same product for real would be miscounted as an

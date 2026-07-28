@@ -1,8 +1,14 @@
 query CartValidationsGenerateRunInput {
+  localization {
+    country {
+      isoCode
+    }
+  }
   cart {
     cost {
       subtotalAmount {
         amount
+        currencyCode
       }
     }
     lines {

@@ -6,7 +6,8 @@
       "cart": {
         "cost": {
           "subtotalAmount": {
-            "amount": "50.00"
+            "amount": "50.00",
+            "currencyCode": "USD"
           }
         },
         "lines": [
@@ -22,6 +23,11 @@
       },
       "shop": {
         "metafield": null
+      },
+      "localization": {
+        "country": {
+          "isoCode": "US"
+        }
       }
     },
     "output": {
