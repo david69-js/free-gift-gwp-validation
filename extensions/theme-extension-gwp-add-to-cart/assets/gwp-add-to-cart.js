@@ -31,7 +31,7 @@
   var minSubtotal = Number(config.min_subtotal);
   var GIFT_MARKER_KEY = '_gwp_gift';
   var GIFT_MESSAGE_KEY = 'Gift';
-  var GIFT_MESSAGE_VALUE = '🎁 Free gift with your order';
+  var GIFT_MESSAGE_VALUE = 'Free Gift With Purchase';
   var syncing = false;
   var syncQueued = false;
 
