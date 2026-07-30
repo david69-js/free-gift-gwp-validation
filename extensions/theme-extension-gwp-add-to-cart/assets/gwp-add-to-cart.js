@@ -39,17 +39,12 @@
     return typeof window.liquidAjaxCart !== 'undefined' && window.liquidAjaxCart !== null;
   }
 
-  // "Our" gift line: the one we auto-added and are responsible for
-  // managing (removing/clamping). We never touch a line without this
-  // marker - it might be something the customer added on purpose.
-  function isManagedGiftLine(item) {
-    return item.variant_id === giftVariantId && item.properties && item.properties[GIFT_MARKER_KEY] === 'true';
-  }
-
-  // Any line for the gift variant, marked or not. The gift is a real,
-  // $0-priced product - a customer can always reach its product page and
-  // add it with the normal "Add to cart" button. We must count that too,
-  // otherwise we'd add a second (marked) unit on top of it.
+  // Any line for the gift variant is "the gift", full stop - marked by us,
+  // added by the customer, or added by some other app. Other apps have no
+  // idea this variant is special or that we tag it with a property, so
+  // matching on the marker property would miss lines they create. We own
+  // this variant entirely (it's a dedicated, hidden-from-browsing gift
+  // product), so it's safe to manage/consolidate any line that matches it.
   function isAnyGiftVariantLine(item) {
     return item.variant_id === giftVariantId;
   }
@@ -122,6 +117,132 @@
     });
   }
 
+  // Zeroes out a set of gift lines one at a time (not concurrently) so we
+  // never fire overlapping /cart/change.js calls against the same cart.
+  function removeLines(lines) {
+    return lines.reduce(function (promise, line) {
+      return promise.then(function () { return setLineQuantity(line.key, 0); });
+    }, Promise.resolve());
+  }
+
+  // The cart & checkout validation function runs on every cart mutation,
+  // not just at checkout. That means a single-line /cart/change.js call
+  // that would drop the subtotal below min_subtotal while the gift is
+  // still in the cart gets rejected outright - it never reaches our own
+  // reactive cleanup in syncGiftLine, because the mutation that would have
+  // caused it never applies. A naive "remove the gift once we see this
+  // error" fix doesn't work either: as soon as the gift is gone, the cart
+  // still qualifies (the customer's own line never actually changed), so
+  // our own sync immediately re-adds it - a permanent loop. The only way
+  // out is one atomic mutation that changes the customer's line AND
+  // removes the gift together, so the cart is self-consistent the moment
+  // it lands (doesn't qualify, no gift - nothing left to react to).
+  function isGiftThresholdError(status, body) {
+    if (status !== 422) return false;
+    var message = body && (body.message || body.description);
+    return typeof message === 'string' && message.indexOf('qualify for the free gift') !== -1;
+  }
+
+  // Confirmed live: Liquid Ajax Cart sends a JSON string body when we call
+  // its API directly (.change()/.update()), but the theme's own quantity
+  // buttons (data-ajax-cart attributes) submit FormData keyed by "line"
+  // (1-based position in cart.items) and "quantity" - not "id"/"key" - so
+  // both shapes, and both identifier styles, have to be handled.
+  function parseRequestBody(init) {
+    if (!init || init.body == null) return null;
+
+    if (typeof init.body.entries === 'function') {
+      var map = {};
+      Array.from(init.body.entries()).forEach(function (pair) {
+        map[pair[0]] = pair[1];
+      });
+      if (map.quantity == null) return null;
+      if (map.id != null) return {id: map.id, quantity: Number(map.quantity)};
+      if (map.line != null) return {line: Number(map.line), quantity: Number(map.quantity)};
+      return null;
+    }
+
+    if (typeof init.body === 'string') {
+      try {
+        return JSON.parse(init.body);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  function retryBlockedChangeAsCombinedUpdate(init) {
+    var originalBody = parseRequestBody(init);
+    if (!originalBody || originalBody.quantity == null || (originalBody.id == null && originalBody.line == null)) {
+      return;
+    }
+
+    getCart().then(function (cart) {
+      var targetKey = originalBody.id != null ? originalBody.id : (cart.items[originalBody.line - 1] || {}).key;
+      if (!targetKey) return;
+
+      var giftLines = cart.items.filter(isAnyGiftVariantLine);
+      var updates = {};
+      giftLines.forEach(function (line) {
+        updates[line.key] = 0;
+      });
+      updates[targetKey] = originalBody.quantity;
+
+      console.log('[GWP] cart change blocked by gift threshold validation - retrying as a combined update', updates);
+
+      // Through Liquid Ajax Cart's own public API, not a bare fetch - a
+      // bare fetch would change the cart server-side but the library would
+      // never learn about it, so its cached cart state and the DOM it's
+      // bound to would never update.
+      if (hasLiquidAjaxCart()) {
+        return window.liquidAjaxCart.update({updates: updates});
+      }
+
+      return fetch('/cart/update.js', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', Accept: 'application/json'},
+        body: JSON.stringify({updates: updates}),
+      });
+    });
+  }
+
+  // Installed first, before any other cart activity: wraps fetch only to
+  // read the body of a blocked /cart/change.js call (Liquid Ajax Cart's
+  // own request-end event doesn't expose it) and trigger the compensating
+  // update above. It never swaps the response - the original 422 still
+  // reaches Liquid Ajax Cart's normal error handling; our corrected
+  // /cart/update.js is a separate, immediately-following request that
+  // leaves the cart and the UI right where the customer expected them.
+  function installGiftThresholdRetry() {
+    var originalFetch = window.fetch.bind(window);
+
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      var isCartChange = url.indexOf('/cart/change.js') !== -1;
+
+      var responsePromise = originalFetch(input, init);
+      if (!isCartChange) return responsePromise;
+
+      responsePromise
+        .then(function (response) {
+          if (response.status !== 422) return;
+          return response
+            .clone()
+            .json()
+            .then(function (body) {
+              if (isGiftThresholdError(response.status, body)) {
+                retryBlockedChangeAsCombinedUpdate(init);
+              }
+            });
+        })
+        .catch(function () {});
+
+      return responsePromise;
+    };
+  }
+
   function syncGiftLine(cartOverride) {
     if (syncing) {
       syncQueued = true;
@@ -131,18 +252,15 @@
 
     Promise.resolve(cartOverride || getCart())
       .then(function (cart) {
-        var managedGiftLine = cart.items.find(isManagedGiftLine);
-        var anyGiftLines = cart.items.filter(isAnyGiftVariantLine);
-        var anyGiftQuantity = anyGiftLines.reduce(function (total, item) { return total + item.quantity; }, 0);
+        var giftLines = cart.items.filter(isAnyGiftVariantLine);
         var applies = offerApplies();
 
         if (!applies) {
           console.log('[GWP] offer does not apply right now (status/country/currency/test mode), cleaning up', {
-            status: config.status, country: config.country, currency: config.currency, managedGiftLineFound: Boolean(managedGiftLine),
+            status: config.status, country: config.country, currency: config.currency, giftLineCount: giftLines.length,
           });
-          if (managedGiftLine) {
-            console.log('[GWP] removing gift, offer no longer applies');
-            return setLineQuantity(managedGiftLine.key, 0);
+          if (giftLines.length > 0) {
+            return removeLines(giftLines);
           }
           return;
         }
@@ -150,7 +268,7 @@
         // The gift itself is $0, so it never affects the subtotal - but
         // exclude it explicitly anyway in case a manual price override or
         // discount ever changes that assumption.
-        var giftLinesTotal = anyGiftLines.reduce(function (total, item) { return total + item.line_price; }, 0);
+        var giftLinesTotal = giftLines.reduce(function (total, item) { return total + item.line_price; }, 0);
         var subtotalExcludingGift = (cart.items_subtotal_price != null ? cart.items_subtotal_price : cart.total_price) - giftLinesTotal;
         var qualifies = subtotalExcludingGift / 100 >= minSubtotal;
 
@@ -158,24 +276,35 @@
           subtotalExcludingGift: subtotalExcludingGift / 100,
           minSubtotal: minSubtotal,
           qualifies: qualifies,
-          managedGiftLineFound: Boolean(managedGiftLine),
-          anyGiftQuantity: anyGiftQuantity,
-          cartItems: cart.items.map(function (i) { return {variant_id: i.variant_id, properties: i.properties}; }),
+          giftLineCount: giftLines.length,
+          cartItems: cart.items.map(function (i) { return {variant_id: i.variant_id, quantity: i.quantity, properties: i.properties}; }),
         });
 
-        // Someone already has the gift variant in their cart in some form
-        // (manually from its product page, or our own managed line) -
-        // never add a second one on top of it.
-        if (qualifies && anyGiftQuantity === 0) {
+        if (!qualifies) {
+          if (giftLines.length > 0) {
+            console.log('[GWP] removing gift, no longer qualifies');
+            return removeLines(giftLines);
+          }
+          return;
+        }
+
+        // Qualifies: exactly one gift line at quantity 1, no matter who
+        // added it, what properties it carries, or how many duplicates
+        // piled up (another app adding it concurrently with us, etc.).
+        if (giftLines.length === 0) {
           console.log('[GWP] adding gift');
           return addGift();
         }
-        if (qualifies && managedGiftLine && managedGiftLine.quantity > 1) {
-          return setLineQuantity(managedGiftLine.key, 1);
+        if (giftLines.length > 1) {
+          console.log('[GWP] consolidating duplicate gift lines', {count: giftLines.length});
+          var keep = giftLines[0];
+          var extras = giftLines.slice(1);
+          return removeLines(extras).then(function () {
+            if (keep.quantity !== 1) return setLineQuantity(keep.key, 1);
+          });
         }
-        if (!qualifies && managedGiftLine) {
-          console.log('[GWP] removing gift, no longer qualifies');
-          return setLineQuantity(managedGiftLine.key, 0);
+        if (giftLines[0].quantity !== 1) {
+          return setLineQuantity(giftLines[0].key, 1);
         }
       })
       .catch(function (e) {
@@ -222,6 +351,10 @@
   function pollCart() {
     setInterval(function () { syncGiftLine(); }, 10000);
   }
+
+  // Installed first, and unconditionally - any cart mutation on the page,
+  // by any theme control or app, can hit the threshold deadlock above.
+  installGiftThresholdRetry();
 
   // Registered unconditionally (harmless if unused): Liquid Ajax Cart might
   // not be initialized yet at this exact point even if the theme uses it.
